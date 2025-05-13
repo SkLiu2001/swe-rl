@@ -73,7 +73,7 @@ if __name__ == "__main__":
     found_files = {
         d["instance_id"]: d["found_files"][: args.max_samples] for d in loc_results
     }
-    dataset = dataset.filter(lambda x: x["instance_id"] in found_files)
+    dataset = dataset.filter(lambda x: x["instance_id"] in found_files) #只保留那些 instance_id 存在于模型定位结果（found_files）中的样本。
     dataset = dataset.map(
         lambda x: map_to_analysis(found_files, x),
         remove_columns=dataset.column_names,

@@ -128,13 +128,27 @@ async def run_with_semaphore(
         return (index, await task)
 
 
+async def run_with_retry(semaphore, coro, idx, retries=3, delay=2):
+    for attempt in range(retries):
+        try:
+            return await run_with_semaphore(semaphore, coro, idx)
+        except Exception as e:
+            if attempt < retries - 1:
+                await asyncio.sleep(delay)
+            else:
+                return idx, None  # 或 raise e，根据需求
+
+
 async def collect_responses_async(
     client: OpenAIClient,
     semaphore: asyncio.Semaphore,
     all_requests: list[dict],
+    retries: int = 3,
+    delay: int = 2,
 ):
     all_tasks = [
-        run_with_semaphore(semaphore, client.safe_chat_completion(request), idx)
+        #run_with_semaphore(semaphore, client.safe_chat_completion(request), idx)
+        run_with_retry(semaphore, client.safe_chat_completion(request), idx, retries, delay)
         for idx, request in enumerate(all_requests)
     ]
     idx_and_responses = list[tuple[int, ChatCompletion | None]]()

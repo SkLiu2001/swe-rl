@@ -200,10 +200,17 @@ async def process_loc(
         for prompt in all_topn_contents
     ]
     del all_topn_contents
+    
+    # print("--------------------------------")
+    # print(all_requests)
+    # print("--------------------------------")
 
     idx_and_responses = await utils.api.collect_responses_async(
-        client, semaphore, all_requests
+        client, semaphore, all_requests, inf_args.retries
     )
+    # print("--------------------------------")
+    # print(idx_and_responses)
+    # print("--------------------------------")
     assert len(idx_and_responses) == inf_args.num_samples
     indices = [idx for idx, _ in idx_and_responses]
     assert sorted(indices) == list(range(inf_args.num_samples))
@@ -284,6 +291,7 @@ async def repair(
 
 
 def post_process_raw_output(raw_output_text: str, file_contents: dict[str, str]):
+    """对模型生成的修复代码进行后处理，生成 git diff 补丁，并判断修复代码的有效性。"""
     git_diffs = ""
     raw_git_diffs = ""
     edited_files = list[str]()
@@ -327,6 +335,7 @@ def post_process_repair(args: Args, select_id: int):
     raw_outputs = utils.misc.load_jsonl(args.output_file)
     data_to_write = list[dict]()
     for raw_output in raw_outputs:
+        print("--------------------------------")
         instance_id = raw_output["instance_id"]
         if raw_output["raw_output"] == "":
             data_to_write.append(
@@ -387,6 +396,7 @@ def post_process_repair(args: Args, select_id: int):
                 "new_file_content": new_contents,
             }
         )
+        print("--------------------------------")
     with open(output_file, "w") as f:
         for entry in data_to_write:
             f.write(json.dumps(entry) + "\n")

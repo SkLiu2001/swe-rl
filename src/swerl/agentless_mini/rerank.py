@@ -1,7 +1,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates. All rights reserved.
 
 """NOTE: this file is mostly not refactored."""
-
+"""对模型生成的多个修复补丁（patch）结果进行归一化、评测、排序（重排序/投票），最终为每个实例选出最优的补丁，并输出结果。"""
 import argparse
 import concurrent.futures
 import json

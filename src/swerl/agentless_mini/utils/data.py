@@ -302,6 +302,11 @@ def fake_git_repo(repo_playground, file_pathes, old_contents, new_contents) -> s
     # create a fake git repo
     subprocess.run(f"cd {repo_playground} && git init", shell=True)
 
+    # 添加调试信息
+    for file_path, old_content, new_content in zip(file_pathes, old_contents, new_contents):
+        if old_content == new_content:
+            print("Warning: Old and new content are identical!")
+            
     for file_path, old_content, new_content in zip(
         file_pathes, old_contents, new_contents
     ):
@@ -743,17 +748,21 @@ def parse_diff_edit_commands(commands: list[str], content: str) -> str:
         if not subcommand.startswith("<<<<<<< SEARCH") and subcommand.endswith(
             ">>>>>>> REPLACE"
         ):
+            # print(f"subcommand {subcommand} not in content")
             continue
 
         subcommand = "\n".join(subcommand.splitlines()[1:-1])
         if len(subcommand.split("\n=======\n")) != 2:
+            # print(f"number of subcommand {subcommand} is not 2")
             continue
 
         original, replace = subcommand.split("\n=======\n")
 
         if original in content:
             can_apply.append(subcommand)
-
+        else:
+            # print(f"original not in content")
+            continue
     # apply edits backwards
     # for subcommand in can_apply[::-1]:
     # NOTE(yuxiang): 02/16, not needed; just apply them forwards
