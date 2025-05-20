@@ -1,7 +1,3 @@
-# Copyright (c) Meta Platforms, Inc. and affiliates. All rights reserved.
-
-import asyncio
-import concurrent.futures
 import json
 import os
 import random
@@ -13,7 +9,7 @@ from datasets import Dataset
 from tqdm.auto import tqdm
 
 import swerl.agentless_mini.utils as utils
-
+from swerl.agentless_mini.utils.api_sequential import APIClient, collect_responses
 
 @dataclass(frozen=True)
 class Args:
@@ -25,7 +21,6 @@ class Args:
     @property
     def output_file(self):
         return (Path(self.output_folder) / "output.jsonl").as_posix()
-
 
 def _post_process_multifile_repair(
     raw_output: str, file_contents: dict[str, str]
@@ -53,9 +48,7 @@ def _post_process_multifile_repair(
 
     return edited_files, new_contents
 
-
 TOKEN_COUNT_MAP: dict[tuple[str, str], int] = {}
-
 
 def count_tokens(instance_id: str, file_name: str, content: str) -> int:
     key = (instance_id, file_name)
@@ -65,19 +58,13 @@ def count_tokens(instance_id: str, file_name: str, content: str) -> int:
     TOKEN_COUNT_MAP[key] = tokens
     return tokens
 
-
 def construct_topn_file_context(
     instance_id: str,
     pred_files: list[str],
     file_contents: dict[str, str],
     max_input_tokens: int,
-    # Randomize the order of the contents
     randomize: bool = False,
 ):
-    """Concatenate provided locations to form a context.
-
-    loc: {"file_name_1": ["loc_str_1"], ...}
-    """
     num_tokens = 0
     all_contents = list[str]()
     for pred_file in pred_files:
@@ -95,21 +82,14 @@ def construct_topn_file_context(
         random.shuffle(all_contents)
     return "\n\n".join(all_contents)
 
-
-T = TypeVar("T")
-
-
-async def process_loc(
+def process_loc(
     args: Args,
     inf_args: utils.args.InferenceArgs,
-    # bench_args: utils.args.BenchArgs,
-    client: utils.api.APIClient,
-    semaphore: utils.api.MonitoredSemaphore,
+    client: APIClient,
     loc: dict,
     swe_bench_data: list[dict],
     prev_o: list[dict],
 ):
-    # 函数功能：根据本地化结果，生成修复补丁
     instance_id = loc["instance_id"]
     found = any(o["instance_id"] == instance_id for o in prev_o)
 
@@ -117,9 +97,8 @@ async def process_loc(
         print(f"skipping {instance_id} since patch already generated")
         return None
 
-    # Backward compatibility
     if len(loc["found_files"]) == 0 or isinstance(loc["found_files"][0], str):
-        loc["found_files"] = [loc["found_files"]]  # convert to list of list
+        loc["found_files"] = [loc["found_files"]]
 
     if all(len(x) == 0 for x in loc["found_files"]):
         print(f"no files found for {instance_id}")
@@ -129,14 +108,11 @@ async def process_loc(
     all_found_files = [
         pred_files for pred_files in all_found_files if len(pred_files) > 0
     ]
-    # Add remaining found files from the first found few files
     assert len(all_found_files) > 0
 
-    # only keep unique pred_files in all_found_files. all_found_files is a list[list[str]]
     unique_files_set = set[tuple[str, ...]]()
     unique_all_found_files: list[list[str]] = []
     for pred_files in all_found_files:
-        # Convert the list to a tuple to make it hashable for the set
         pred_files_tuple = tuple(pred_files)
         if pred_files_tuple not in unique_files_set:
             unique_files_set.add(pred_files_tuple)
@@ -165,22 +141,15 @@ async def process_loc(
         messages.append({"role": "user", "content": content})
         return messages
 
-    # Construct file contents
     def _get_file_contents(pred_files: list[str]) -> dict[str, str]:
         return {
             pred_file: "\n".join(repo_file_contents_dict[pred_file])
             for pred_file in pred_files
-            # # This should be always true except for one special GT case:
-            # # astropy/coordinates/builtin_frames/itrs_observed_transforms.py
-            # # This is fixed in the GT file (12/26/24).
-            # if pred_file in repo_file_contents_dict
         }
 
     all_topn_contents = list[str]()
     randomize = inf_args.num_samples > 1
     for pred_files in all_found_files:
-        # pred_files = pred_files[: args.top_n]
-        # Construct file contents
         topn_content = construct_topn_file_context(
             instance_id,
             pred_files,
@@ -201,19 +170,11 @@ async def process_loc(
         for prompt in all_topn_contents
     ]
     del all_topn_contents
-    
-    # print("--------------------------------")
-    # print(all_requests)
-    # print("--------------------------------")
 
-    idx_and_responses = await utils.api.collect_responses_async(
-        client, semaphore, all_requests, inf_args.retries, inf_args.delay
+    idx_and_responses = collect_responses(
+        client, all_requests, inf_args.retries, inf_args.delay
     )
     
-    # idx_and_responses = []
-    # print("--------------------------------")
-    # print(idx_and_responses)
-    # print("--------------------------------")
     assert len(idx_and_responses) == inf_args.num_samples
     indices = [idx for idx, _ in idx_and_responses]
     assert sorted(indices) == list(range(inf_args.num_samples))
@@ -234,8 +195,6 @@ async def process_loc(
         all_trajs.append(dict(prompt=prompt, response=output))
 
         all_generations.append(output)
-
-        # Extract the <solution> part
         output = utils.api.parse_thinking_output(output)
 
         edited_files, new_contents = _post_process_multifile_repair(
@@ -260,16 +219,12 @@ async def process_loc(
         all_indices=indices,
         all_found_files=all_found_files,
     )
-    # all_generations: 原始输出，未处理
-    # all_generations: 经过提取和后处理的输出（提取<solution>标签）
 
-
-async def repair(
+def repair(
     args: Args,
     inf_args: utils.args.InferenceArgs,
     swe_bench_data: Dataset,
 ):
-    # 函数功能：根据本地化结果，生成修复补丁
     locs = utils.misc.load_jsonl(args.loc_file)
     prev_o = (
         utils.misc.load_jsonl(args.output_file)
@@ -280,28 +235,17 @@ async def repair(
     all_instance_ids = set(swe_bench_data["instance_id"])
     locs = [loc for loc in locs if loc["instance_id"] in all_instance_ids]
 
-    client = utils.api.APIClient()
-    semaphore = utils.api.MonitoredSemaphore(inf_args.max_concurrent_requests)
+    client = APIClient()
     
-    all_tasks = [
-        process_loc(args, inf_args, client, semaphore, loc, swe_bench_data, prev_o)
-        for loc in locs
-    ]
-    pbar = tqdm(total=len(all_tasks), desc="Process all instances")
-    for completion in asyncio.as_completed(all_tasks):
-        result = await completion
-        pbar.update(1)
-        pbar.set_postfix({
-            'available': semaphore.available,
-            'used': semaphore.used
-        })
-        if result is not None:
-            with open(args.output_file, "a") as f:
-                f.write(json.dumps(result) + "\n")
-
+    with tqdm(total=len(locs), desc="Process all instances") as pbar:
+        for loc in locs:
+            result = process_loc(args, inf_args, client, loc, swe_bench_data, prev_o)
+            pbar.update(1)
+            if result is not None:
+                with open(args.output_file, "a") as f:
+                    f.write(json.dumps(result) + "\n")
 
 def post_process_raw_output(raw_output_text: str, file_contents: dict[str, str]):
-    """对模型生成的修复代码进行后处理，生成 git diff 补丁，并判断修复代码的有效性。"""
     git_diffs = ""
     raw_git_diffs = ""
     edited_files = list[str]()
@@ -328,15 +272,11 @@ def post_process_raw_output(raw_output_text: str, file_contents: dict[str, str])
     if syntax_success and not differ_by_empty_lines:
         git_diffs = raw_git_diffs
     else:
-        git_diffs = ""  # no need to evaluate
+        git_diffs = ""
 
     return git_diffs, raw_git_diffs, contents, edited_files, new_contents
 
-
 def post_process_repair(args: Args, select_id: int):
-    """
-    apply some diff formatting.
-    """
     output_file = args.output_file.replace(".jsonl", f"_{select_id}_processed.jsonl")
     if os.path.exists(output_file):
         print(f"output file {output_file} already exists. skipping.")
@@ -358,7 +298,6 @@ def post_process_repair(args: Args, select_id: int):
             continue
 
         assert select_id >= 0
-        # Use the indexed generation
         generation_idx = select_id
 
         raw_output_text = raw_output["all_generations"][0][generation_idx]
@@ -368,7 +307,6 @@ def post_process_repair(args: Args, select_id: int):
         git_diffs = ""
         raw_git_diffs = ""
         if isinstance(raw_output["raw_output"], str):
-            # for backward compatibility
             raw_output["raw_output"] = [raw_output["raw_output"]]
 
         if isinstance(original_file_content, str):
@@ -411,8 +349,7 @@ def post_process_repair(args: Args, select_id: int):
         for entry in data_to_write:
             f.write(json.dumps(entry) + "\n")
 
-
-async def main(
+def main(
     bench_args: utils.args.BenchArgs,
     inference_args: utils.args.InferenceArgs,
     args: Args,
@@ -428,16 +365,10 @@ async def main(
         json.dump(meta, f, indent=4)
 
     swe_bench_data = bench_args.load()
-    await repair(args, inference_args, swe_bench_data)
-    with concurrent.futures.ThreadPoolExecutor() as executor:
-        futures = [
-            executor.submit(post_process_repair, args, i)
-            for i in range(inference_args.num_samples)
-        ]
-        for future in concurrent.futures.as_completed(futures):
-            # make sure to catch any exceptions here
-            future.result()
-
+    repair(args, inference_args, swe_bench_data)
+    
+    for i in range(inference_args.num_samples):
+        post_process_repair(args, i)
 
 if __name__ == "__main__":
     params = utils.args.parse_args_into_dataclasses(
@@ -445,4 +376,4 @@ if __name__ == "__main__":
         utils.args.InferenceArgs,
         Args,
     )
-    asyncio.run(main(*params))
+    main(*params) 

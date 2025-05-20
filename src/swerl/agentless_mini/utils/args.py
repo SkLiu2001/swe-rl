@@ -46,7 +46,7 @@ class InferenceArgs:
         metadata={"help": "Maximum number of concurrent requests sent to the backend"},
     )
     retries: int = field(default=3, metadata={"help": "Number of retries for failed requests"})
-    delay: int = field(default=10, metadata={"help": "Delay between retries"})
+    delay: int = field(default=30, metadata={"help": "Delay between retries"})
 
 def parse_args_into_dataclasses(*classes: DataClassType):
     return HfArgumentParser(classes).parse_args_into_dataclasses()

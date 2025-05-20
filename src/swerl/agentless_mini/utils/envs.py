@@ -30,3 +30,10 @@ assert TOKENIZER_MODEL is not None
 # hf or tiktoken
 TOKENIZER_TYPE = os.getenv("TOKENIZER_TYPE", "hf")
 assert TOKENIZER_TYPE in ["hf", "tiktoken"], f"Invalid TOKENIZER_TYPE: {TOKENIZER_TYPE}"
+
+# 给这些值赋值
+API_TYPE = os.getenv("API_TYPE", "openai")
+assert API_TYPE in ["openai", "whale"], f"Invalid API_TYPE: {API_TYPE}"
+WHALE_API_KEY = os.getenv("WHALE_API_KEY", "your_whale_api_key")
+WHALE_BASE_URL = os.getenv("WHALE_BASE_URL", "whale-wave.alibaba-inc.com")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "your_openai_api_key")

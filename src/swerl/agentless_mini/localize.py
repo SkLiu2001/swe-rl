@@ -17,8 +17,8 @@ class Args:
 
 
 async def localize_instance(
-    client: utils.api.OpenAIClient,
-    semaphore: asyncio.Semaphore,
+    client: utils.api.APIClient,
+    semaphore: utils.api.MonitoredSemaphore,
     bug: dict,
     args: utils.args.InferenceArgs,
     existing_instance_ids,
@@ -54,8 +54,8 @@ async def localize_instance(
 
 
 async def localize_files(
-    client: utils.api.OpenAIClient,
-    semaphore: asyncio.Semaphore,
+    client: utils.api.APIClient,
+    semaphore: utils.api.MonitoredSemaphore,
     problem_statement: str,
     structure: dict,
     args: utils.args.InferenceArgs,
@@ -65,6 +65,7 @@ async def localize_files(
     found_files: list[str] = []
 
     def get_message():
+        # 采样数量大于1时，随机化，prompt里允许生成更多的文件
         randomize = args.num_samples > 1
         num_files = 5 if not randomize else random.randint(2, 5)
         indentation = 4 if not randomize else random.choice([2, 4])
@@ -97,7 +98,7 @@ async def localize_files(
     ]
 
     idx_and_responses = await utils.api.collect_responses_async(
-        client, semaphore, all_requests
+        client, semaphore, all_requests, args.retries, args.delay
     )
     assert len(idx_and_responses) == args.num_samples
 
@@ -137,8 +138,9 @@ async def main(
     swe_bench_data = bench_args.load()
     existing_instance_ids = utils.misc.load_existing_instance_ids(args.output_file)
 
-    client = utils.api.OpenAIClient()
-    semaphore = asyncio.Semaphore(inference_args.max_concurrent_requests)
+    client = utils.api.APIClient()
+    semaphore = utils.api.MonitoredSemaphore(inference_args.max_concurrent_requests)
+    
     all_tasks = [
         localize_instance(client, semaphore, bug, inference_args, existing_instance_ids)
         for bug in swe_bench_data
